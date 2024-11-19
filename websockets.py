@@ -3,10 +3,17 @@ from flask_socketio import emit, join_room, leave_room, disconnect
 from app.extensions import socketio
 import logging
 from datetime import datetime
+import websockets
+import asyncio
 
+# Configure logging
 logging.basicConfig(
     level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
+# Specific logger for WebSocket
+websocket_logger = logging.getLogger("websockets")
+websocket_logger.setLevel(logging.DEBUG)
 
 
 def get_private_room(sender_id, receiver_id):
@@ -74,3 +81,22 @@ def handle_disconnect():
     """Handle WebSocket disconnection."""
     logging.info("Client disconnected")
 
+
+# WebSocket server handler for additional logging
+
+
+async def handler(websocket, path):
+    websocket_logger.info(f"New connection from {path}")
+    try:
+        async for message in websocket:
+            websocket_logger.debug(f"Received message: {message}")
+            await websocket.send(message)
+    except websockets.ConnectionClosed as e:
+        websocket_logger.warning(f"Connection closed: {e}")
+
+
+# Start the WebSocket server
+start_server = websockets.serve(handler, "localhost", 8765)
+
+asyncio.get_event_loop().run_until_complete(start_server)
+asyncio.get_event_loop().run_forever()
