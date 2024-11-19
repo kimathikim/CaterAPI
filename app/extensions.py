@@ -35,6 +35,6 @@ def init_extensions(app):
         ping_timeout=120,
         async_mode="eventlet",
         cors_allowed_origins="*",
+        path="socket.io",  # Set custom path without leading slash
     )
-
     mail.init_app(app)
