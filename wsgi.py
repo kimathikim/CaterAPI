@@ -1,12 +1,12 @@
 from flask import request
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
 import logging
 from flask_socketio import emit, join_room
 from app.factory import create_app
-from app.extensions import socketio
+from app.extensions import socketio, redis_client
 
 app = create_app()
-
 
 logging.basicConfig(
     level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -14,17 +14,47 @@ logging.basicConfig(
 websocket_logger = logging.getLogger("websockets")
 websocket_logger.setLevel(logging.DEBUG)
 
+
 # Utility function to create private room names
-
-
 def get_private_room(sender_id, receiver_id):
     """Generate a consistent private room name for the sender and receiver."""
     return f"private_{min(sender_id, receiver_id)}_{max(sender_id, receiver_id)}"
 
 
+def save_message_to_redis(room, message):
+    """Save a message in Redis under the room key with an expiry of 2 days."""
+    try:
+        # Get existing messages for the room
+        messages = redis_client.get(room)
+        if messages:
+            messages = json.loads(messages)
+        else:
+            messages = []
+
+        # Append the new message
+        messages.append(message)
+
+        # Save the updated message list to Redis with a 2-day expiration
+        redis_client.setex(room, timedelta(days=2), json.dumps(messages))
+        logging.info(f"Message saved to Redis for room {room}: {message}")
+    except Exception as e:
+        logging.error(f"Error saving message to Redis: {str(e)}")
+
+
+# Utility function to retrieve messages from Redis
+def get_messages_from_redis(room):
+    """Retrieve all messages for a room from Redis."""
+    try:
+        messages = redis_client.get(room)
+        if messages:
+            return json.loads(messages)
+        return []
+    except Exception as e:
+        logging.error(f"Error retrieving messages from Redis: {str(e)}")
+        return []
+
+
 # WebSocket Events
-
-
 @socketio.on("connect")
 def handle_connect():
     """Handle WebSocket connection."""
@@ -54,6 +84,12 @@ def join_private_room(data):
         room = get_private_room(sender_id, receiver_id)
         join_room(room)
         logging.info(f"User {sender_id} joined private room {room}")
+
+        # Retrieve and send previous messages from Redis
+        messages = get_messages_from_redis(room)
+        emit("room_messages", {"room": room,
+             "messages": messages}, to=request.sid)
+
         emit("user_joined", {"user_id": sender_id}, room=room)
         emit("room_joined", {"room": room,
              "status": "success"}, to=request.sid)
@@ -86,6 +122,11 @@ def ws_send_private_message(data):
             "text": text,
             "timestamp": datetime.utcnow().isoformat(),
         }
+
+        # Save the message to Redis
+        save_message_to_redis(room, message)
+
+        # Broadcast the message to the room
         emit("receive_private_message", message, room=room)
         logging.info(f"Message sent to room {room} from {sender_id}: {text}")
     except Exception as e:
@@ -98,8 +139,7 @@ def handle_disconnect():
     """Handle WebSocket disconnection."""
     user_id = request.args.get("user_id")
     logging.info(f"User {user_id} disconnected")
-    jls_extract_var = emit
-    jls_extract_var("user_disconnected", {"user_id": user_id}, broadcast=True)
+    emit("user_disconnected", {"user_id": user_id}, broadcast=True)
 
 
 application = app
