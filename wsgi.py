@@ -1,14 +1,12 @@
+import json
 import logging
 from datetime import datetime
-
 from flask import request
 from flask_socketio import emit, join_room
-
 from app.extensions import socketio
 from app.factory import create_app
 
 app = create_app()
-
 
 logging.basicConfig(
     level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -67,6 +65,14 @@ def join_private_room(data):
 @socketio.on("send_private_message")
 def ws_send_private_message(data):
     """Handle sending a private message."""
+    try:
+        # Ensure data is valid JSON
+        data = json.loads(data)
+    except json.JSONDecodeError:
+        logging.error("send_private_message: Received invalid JSON data")
+        emit("error", {"status": "error", "message": "Invalid JSON data"})
+        return
+
     sender_id = data.get("sender_id")
     text = data.get("text")
     receiver_id = data.get("receiver_id")
